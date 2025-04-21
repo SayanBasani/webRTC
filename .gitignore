@@ -23,5 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-.Backend/node_modules/*
+.Backend/node_modules
+.Backend/node_modules
 .react-webRTC/node_modules/*
