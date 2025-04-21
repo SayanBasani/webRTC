@@ -25,4 +25,5 @@ dist-ssr
 
 .Backend/node_modules
 .Backend/node_modules
+.Backend/node_modules/*
 .react-webRTC/node_modules/*
