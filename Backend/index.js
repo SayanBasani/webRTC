@@ -28,11 +28,7 @@ io.on('connection', (socket) => {
   userListWithSocketId.set(socketId,{uid,socketId});
   console.log(`connected user id is ${socketId}-->`,userListWithUid);
 
-  socket.on("acceptCall",(data)=>{
-    const {callerId,offer} = data;
-    if (!callerId || !offer) {return;}
-    socket.to(callerId).emit("acceptCall",{from:socket.id , offer});
-  })
+
   socket.on("outgoingCall",(data)=>{
     const {reciverData , offer } = data;
     if(!reciverData || !offer){ return ;}
@@ -44,9 +40,20 @@ io.on('connection', (socket) => {
     }
     const reciverSocketId = reciverDetails.socketId;
     console.log("reciverData -->",reciverSocketId);
-    socket.to(reciverSocketId).emit("incomingCall",{connected:true ,callFrom :uid,from:socket.id , offer});
+    socket.to(reciverSocketId).emit("incomingCall",{connected:true , reciverId : reciverSocketId, senderId :socket.id , offer});
   })
+
+  socket.on("acceptCall",(data)=>{
+    const {callerId,offer} = data;
+    if (!callerId || !offer) {return;}
+    socket.to(callerId).emit("incomingAnswer",{from:socket.id , offer});
+  })
+
   // Event More i have to add -> cancelCall ,rejectCall,endCall
+  socket.on("iceCandidate", (data) => {
+    const { candidate, to } = data;
+    socket.to(to).emit("iceCandidate", { candidate });
+  });
   socket.on('disconnect', function () {
     console.log(socket.id,'user disconnected');
     userListWithUid.delete(uid);

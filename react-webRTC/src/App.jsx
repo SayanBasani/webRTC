@@ -5,17 +5,74 @@ import SenderVideo from "./Components/senderVideo"
 import { socketContext } from './Providers/Socket'
 
 function App() {
-  const [localOffer, setlocalOffer] = useState(null);
-  const [remoteStream, setRemoteStream] = useState(null);
+  const { uid, setuid, reciverUid, setreciverUid, socket } = useContext(socketContext);
+  // const [localOffer, setlocalOffer] = useState(null);
+  const [remoteCallStream, setremoteCallStream] = useState(null);
+  const [localStream, setLocalStream] = useState(null);
   const [mode, setMode] = useState(null); // "caller" | "receiver"
 
-  const [peer, setpeer] = useState(null);
+  const [peer, setPeer] = useState(null);
 
-  const { uid, setuid, reciverUid, setreciverUid, socket } = useContext(socketContext);
-  const hi = useRef();
+  useEffect(() => {
+    const createPeer = async () => {
+      if (!reciverUid || !uid || !socket) return;
+      const _peer = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+      if(!socket){console.warn("no socket!"); return;}
+      _peer.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("iceCandidate", {
+            target: reciverUid,
+            candidate: event.candidate
+          });
+        }
+      };
+      
+     
+      const myStream = await navigator.mediaDevices.getUserMedia({ video: true });
+  
+      for (const track of myStream.getTracks()) {
+        _peer.addTrack(track, myStream);
+      }
+      setLocalStream(myStream);
+      setPeer(_peer);
+    };
+  
+    createPeer();
+  }, [reciverUid, uid, socket]);
+  
+  useEffect(()=>{
+    if(!socket){console.warn("no socket !"); return;}
+    
+    socket.on("iceCandidate", ({ candidate }) => {
+      // if (peer && candidate) {
+      //   peer.addIceCandidate(new RTCIceCandidate(candidate));
+      // }
+      if (candidate) {
+        peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.warn("ICE error", e));
+      }
+      
+    });
+  },[uid ,socket ,peer])
+  useEffect(() => {
+    if (!peer) { console.warn("no peer"); return; }
+    // peer.ontrack = (event)=>{
+    //   const [remoteStream] = event.streams;
+    //   setremoteCallStream(remoteStream);
+    // }
+    peer.ontrack = (event) => {
+      const remoteStream = event.streams[0];
+      if (remoteStream && remoteCallStream !== remoteStream) {
+        setremoteCallStream(remoteStream);
+      }
+    };
+    
+  }, [peer]);
+
   const inpUid = useRef();
   const inpreciverUid = useRef();
-  const hello = useRef();
+
   const handleUid = useCallback((data) => {
     const _uidValue = inpUid.current.value;
     if (!_uidValue) { return; }
@@ -25,78 +82,57 @@ function App() {
     setMode("caller");
   }, [uid]);
 
-  const handleReciverUid = useCallback((data) => {
+  const handleReciverUid = useCallback(async (data) => {
     const _uidReciverValue = inpreciverUid.current.value;
-    if (!uid) { alert("Must Need a Uid !"); return; }
-    if (!_uidReciverValue) { return; }
-    const uidReciverValue = _uidReciverValue.trim()
-    // console.log("reciver data is--", uidReciverValue);
+    if (!socket) { console.warn("Socket is not initialized yet."); return; }
+    if (!uid || !_uidReciverValue) { alert("Must Need a Uid & reciver Id !"); return; }
+
+    const uidReciverValue = _uidReciverValue.trim();
     setreciverUid(uidReciverValue);
-    if (!socket) {
-      console.warn("Socket is not initialized yet.");
-      return;
-    }
+    if (!peer) { console.warn("no peer"); return }
+    const localOffer = await peer.createOffer();
+    await peer.setLocalDescription(new RTCSessionDescription(localOffer));
+
     socket.emit("outgoingCall", { reciverData: uidReciverValue, offer: localOffer });
+
   }, [uid, reciverUid, socket]);
 
   useEffect(() => {
-    if (!socket) {
-      console.warn("Socket is not initialized yet.");
-      return;
-    }
-    socket.on("incomingCall", async (data) => {
+    if (!socket || !peer) { console.warn("Socket || peer is not initialized yet."); return; }
+
+    const handleIncoming = async (data) => {
       if (!data.connected) { console.log("this is ofline"); return; }
-      const { offer, senderUid } = data;
-      const _peer = new RTCPeerConnection({
-        iceServers: [
-          {
-            urls: "stun:stun.l.google.com:19302",
-          },
-        ],
-      });
-      setpeer(_peer);
-      _peer.ontrack = (event) => {
-        const remoteStream = event.streams[0];
-        setRemoteStream(remoteStream); // You need to define this with useState
-      };
-      navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
-        stream.getTracks().forEach((track) => _peer.addTrack(track, stream));
-      })
-      await _peer.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await _peer.createAnswer();
-      await _peer.setLocalDescription(answer);
-      socket.emit("answer", { answer, to: senderUid })
+      const { offer, senderId } = data;
+
+      await peer.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      // socket.to(senderId).emit("acceptCall", { answer, to: socket.id })
+      socket.emit("acceptCall", { callerId: senderId, offer: answer });
+
       console.log("the user is online -->", data);
       setMode("receiver");
+    };
+
+    socket.on("incomingCall", handleIncoming)
+
+    socket.on('incomingAnswer', async (data) => {
+      const { offer } = data;
+      await peer.setRemoteDescription(new RTCSessionDescription(offer))
     })
+
     socket.on("incomingCallErr", (data) => {
       if (!data) { return; }
       console.log("the user is offline -->", data);
     })
-  }, [socket])
 
-  const handleHi = () => { console.log("hi"); }
-  const handleHello = () => { console.log("hello"); }
-  useEffect(() => {
-    if (!uid) { return; }
-    const _peer = new RTCPeerConnection({
-      iceServers: [
-        {
-          urls: "stun:stun.l.google.com:19302",
-        },
-      ],
-    });
-    navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
-      stream.getTracks().forEach((track) => _peer.addTrack(track, stream));
-    });
-    _peer.onicecandidate = (event) => {
-      if (event.candidate) { }
-    }
-    _peer.createOffer().then(async (offer) => {
-      await _peer.setLocalDescription(offer);
-      setlocalOffer(offer);
-    })
-  }, [uid])
+return () => {
+  socket.off("incomingCall", handleIncoming);
+  socket.off("incomingAnswer");
+  socket.off("incomingCallErr");
+};
+  }, [socket,peer])
+
 
   return (
     <>
@@ -115,15 +151,15 @@ function App() {
         </div>
         <div className='flex gap-3 justify-around'>
           <div className='border'>
-            <MyVideo  mode={mode} peer={peer}></MyVideo>
+            <MyVideo mode={mode} peer={peer}></MyVideo>
           </div>
           <div className='border'>
-            <SenderVideo stream={remoteStream}></SenderVideo>
+            <SenderVideo stream={remoteCallStream}></SenderVideo>
           </div>
         </div>
         <div className='flex justify-center gap-2 py-3'>
-          <button className='bg-amber-700 rounded-md px-1' onClick={handleHi} ref={hi}>hi</button>
-          <button className='bg-amber-700 rounded-md px-1' onClick={handleHello} ref={hello}>hello</button>
+          {/* <button className='bg-amber-700 rounded-md px-1' onClick={handleHi} ref={hi}>hi</button> */}
+          {/* <button className='bg-amber-700 rounded-md px-1' onClick={handleHello} ref={hello}>hello</button> */}
         </div>
       </div>
     </>
