@@ -1,14 +1,15 @@
 import React, { useEffect, useRef } from 'react';
 
-function SenderVideo({ remoteCallStream }) {
+function SenderVideo({ stream }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    if(!remoteCallStream){console.warn("no video streams !"); return;}
+    if(!stream){console.warn("no video streams !"); return;}
+    console.log('Remote Stream:', stream);
     if (videoRef.current && stream) {
-      videoRef.current.srcObject = remoteCallStream;
+      videoRef.current.srcObject = stream;
     }
-  }, [remoteCallStream]);
+  }, [stream]);
 
   return (
     <video

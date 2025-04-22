@@ -66,9 +66,10 @@ io.on('connection', (socket) => {
 
   socket.on("acceptCall",(data)=>{
     console.log("acceptCall --- incomingAnswer");
-    const {callerId,offer} = data;
-    if (!callerId || !offer) {return;}
-    socket.to(callerId).emit("incomingAnswer",{from:socket.id , offer});
+    // const {callerId,offer} = data;
+    const {callerId,answer} = data;
+    if (!callerId || !answer) {return;}
+    socket.to(callerId).emit("incomingAnswer",{from:socket.id , answer});
   })
 
   socket.on("answerCall",(data)=>{
@@ -82,6 +83,9 @@ io.on('connection', (socket) => {
     const { from,reciverData,candidate } = data;
     console.log("ice-candidate");
     socket.to(reciverData).emit("ice-candidate", { candidate,from });
+  });
+  socket.on("send-ice-candidate", ({ reciverData, candidate }) => {
+    io.to(reciverData).emit("receive-ice-candidate", { candidate });
   });
   socket.on('disconnect', function () {
     console.log(socket.id,'user disconnected');
