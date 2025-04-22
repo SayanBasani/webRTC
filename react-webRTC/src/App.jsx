@@ -15,175 +15,167 @@ function App() {
   const inpUid = useRef();
   const inpreciverUid = useRef();
 
-  const [isCallInProgress, setIsCallInProgress] = useState(false);
-  const startCall = () => {
-    if (isCallInProgress) {
-      console.warn("Call setup is already in progress.");
-      return;
-    }
-    setIsCallInProgress(true);
-    // Proceed with call setup...
-  };
-  useEffect(() => {
-    const createPeer = async () => {
-      if (!reciverUid || !uid || !socket) return;
-      const _peer = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
-      if (!_peer) {
-        console.warn("Peer connection failed to create.");
-        return;
-      }
-      if (!socket) { console.warn("no socket!"); return; }
-      _peer.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit("iceCandidate", {
-            target: reciverUid,
-            candidate: event.candidate
-          });
-        }
-      };
+  const [anyOnceCalling, setanyOnceCalling] = useState(null);
 
+  const handleUid = useCallback(() => {
+    const _uid = inpUid.current.value.trim();
+    if (!_uid) { alert("No Uid"); return; }
+    setuid(_uid);
+    console.log("uid is ", _uid);
+  }, []);
+
+
+  const handleReciverUid = useCallback(() => {
+    const _ruid = inpreciverUid.current.value.trim();
+    if (!_ruid) { alert("no _reciver uid !"); return; }
+    setreciverUid(_ruid);
+    console.log("_ruid is", _ruid);
+  }, [])
+
+  useEffect(() => {  // setup peer connection
+    if(!socket){console.warn({socket});return}
+    const _peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    if (!_peer) { console.warn({ _peer }); return }
+    // get the local tracks
+    ;; (async () => {
       const myStream = await navigator.mediaDevices.getUserMedia({ video: true });
-
-      for (const track of myStream.getTracks()) {
-        _peer.addTrack(track, myStream);
+      for (const tracks of myStream.getTracks()) {
+        _peer.addTrack(tracks, myStream);
       }
-      setLocalStream(myStream);
-      setPeer(_peer);
-    };
+    }
+    )();;
 
-    createPeer();
-  }, [reciverUid, uid, socket]);
+    // get the remote track
+    _peer.ontrack = event => {
+      const [remoteStream] = event.streams;
+      setremoteCallStream(remoteStream);
+    }
 
-  useEffect(() => {
-    if (!socket) return;
-    const handleIceCandidate = ({ candidate }) => {
+    // handle ice candidate
+    _peer.onicecandidate = event => {
+      if (event.candidate) {
+        socket.emit('ice-candidate', {
+          from: socket.id,
+          reciverData: reciverUid,
+          candidate: event.candidate,
+        })
+      }
+    }
+    setPeer(_peer);
+  }, [socket]);
+
+  useEffect(() => { //gpt for iec candidate listion
+    if(!peer || !socket){ console.warn(`socket --${socket},peer --${peer}`);return;}
+    socket.on("ice-candidate", async ({ candidate }) => {
       if (candidate && peer) {
-        peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.warn("ICE error", e));
+        try {
+          await peer.addIceCandidate(new RTCIceCandidate(candidate));
+          console.log("✅ ICE Candidate added");
+        } catch (error) {
+          console.error("Error adding ICE candidate:", error);
+        }
       }
-    };
-
-    socket.on("iceCandidate", handleIceCandidate);
-
-    return () => {
-      socket.off("iceCandidate", handleIceCandidate);
-    };
+    });
   }, [socket, peer]);
 
 
-  useEffect(() => {
-    if (!peer) { console.warn("no peer"); return; }
-    peer.ontrack = (event) => {
-      const remoteStream = event.streams[0];
-      if (remoteStream && remoteCallStream !== remoteStream) {
-        setremoteCallStream(remoteStream);
-      }
-    };
+  useEffect(() => { // handle incomingCall data
+    if (!socket) { console.warn(`socket --${socket}`); return; }
+    socket.on("incomingCall", (data) => {
+      if (!data) { setanyOnceCalling(null); console.warn("no data!"); return; }
+      setanyOnceCalling(data);
+      const { connected, reciverId, senderId, senderPh, offer } = data;
+      console.log("incomingCall data ", data);
+    })
+    // setanyOnceCalling(null);
 
+    socket.on("answerCall", async ({ answer }) => {
+      console.log("on answer");
+      if (!peer) return;
+      await peer.setRemoteDescription(new RTCSessionDescription(answer));
+      setMode("connected");
+      console.log("📞 Call connected!");
+    });
+
+  }, [socket])
+
+  const Call = useCallback((fun) => { //create a outgoingCall emit
+    const makeCall = async () => {
+      if (!socket || !peer || !uid || !reciverUid) { console.warn(`socket--${socket},peer--${peer},uid--${uid},reciverUid--${reciverUid}`); }
+
+      try {
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        console.log("my offer ", offer);
+        socket.emit("outgoingCall", { from: socket.id, offer: offer, reciverData: reciverUid });
+
+      } catch (error) {
+        console.error("Error creating offer:", error);
+      }
+    }
+    makeCall();
+  }, [socket, peer, uid, reciverUid]);
+
+  const rejectOutgoingCall = useCallback(() => { //reject call
+    const _rejectCall = async () => {
+      // console.log("rejected");
+      try {
+        if (!socket || !uid || !reciverUid) { console.warn(`socket--${socket},peer--${peer},uid--${uid},reciverUid--${reciverUid}`); return }
+        socket.emit("rejectOutingCall", { from: socket.id, reciverData: reciverUid })
+
+      } catch (error) {
+        console.error("Error creating offer:", error);
+      }
+    }
+    _rejectCall();
+  }, [uid, socket, reciverUid]);
+
+  const aceptedCall = useCallback(async () => { // handle the answer of the call
+    if (!socket || !peer || !uid) { console.warn(`socket--${socket},peer--${peer},uid--${uid}`); }
+    if (!anyOnceCalling) { console.warn("wait data is not clear", anyOnceCalling); }
+    // try {
+    const { connected, reciverId, senderId, senderPh, offer } = anyOnceCalling;
+    console.log({peer});
+    await peer.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
+    socket.emit("answerCall", { answer, reciverid: senderId, from: socket.id })
+    console.log("emit answer");
+    console.log(anyOnceCalling);
+
+    // } catch (error) {
+    //   console.error("Error accepting call:", error);
+    // }
+  }, [uid, socket, peer, anyOnceCalling])
+
+  // const endCall = useCallback(() => {
+  //   if (!socket) { console.warn(`socket --${socket}`); return; }
+  // }, [uid, socket, reciverUid])
+  const endCall = useCallback(() => {
+    if (peer) {
+      peer.close();
+      setPeer(null);
+    }
+    setremoteCallStream(null);
+    setanyOnceCalling(null);
+    setMode(null);
+    console.log("📞 Call ended.");
   }, [peer]);
 
- 
 
-  const handleUid = useCallback((data) => {
-    const _uidValue = inpUid.current.value;
-    if (!_uidValue) { return; }
-    const uidValue = _uidValue.trim()
-    console.log("data is--", uidValue);
-    setuid(uidValue);
-    setMode("caller");
-  }, [uid]);
-
-  const handleReciverUid = useCallback(async (data) => {
-    const _uidReciverValue = inpreciverUid.current.value;
-    if (!socket) { console.warn("Socket is not initialized yet."); return; }
-    if (!uid || !_uidReciverValue) { alert("Must Need a Uid & reciver Id !"); return; }
-    if (peer && peer.signalingState !== "stable") {
-      console.warn("Already in the middle of call setup.");
-      return;
-    }
-
-    const uidReciverValue = _uidReciverValue.trim();
-    setreciverUid(uidReciverValue);
-    console.log(peer);
-
-    if (!peer) { console.warn("no peer"); return }
-
-    const localOffer = await peer.createOffer();
-    await peer.setLocalDescription(new RTCSessionDescription(localOffer));
-    console.log("outgoingCall --");
-    socket.emit("outgoingCall", { reciverData: uidReciverValue, offer: localOffer });
-
-  }, [uid, reciverUid, socket, peer]);
-
-  useEffect(() => {
-    if (!socket ) { console.warn("Socket is not initialized yet."); return; }
-    // if (!socket || !peer) { console.warn("Socket || peer is not initialized yet."); return; }
-
-    const handleIncoming = async (data) => {
-      console.log("incomingCall ---> acceptCall");
-      if (!data.connected) { console.log("this is ofline"); return; }
-      console.log("incomingCall from ->", data);
-      const { offer, senderId } = data;
-      if(!peer){console.warn("peer is null");return;}
-      await peer.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      // socket.to(senderId).emit("acceptCall", { answer, to: socket.id })
-      socket.emit("acceptCall", { callerId: senderId, offer: answer });
-
-      console.log("the user is online -->", data);
-      setMode("receiver");
-    };
-
-    socket.on("incomingCall", handleIncoming)
-
-    socket.on('incomingAnswer', async (data) => {
-      console.log("incomingAnswer --");
-      const { offer } = data;
-      await peer.setRemoteDescription(new RTCSessionDescription(offer))
-    })
-
-    socket.on("incomingCallErr", (data) => {
-      if (!data) { return; }
-      console.log("the user is offline -->", data);
-    })
-
-    return () => {
-      socket.off("incomingCall", handleIncoming);
-      socket.off("incomingAnswer");
-      socket.off("incomingCallErr");
-    };
-  }, [socket, peer])
-
-const endCall = () => {
-  if (peer) {
-    // Close the peer connection
-    peer.close();
-    // setPeer(null);
-
-    // Stop all tracks of the local stream
-    // if (localStream) {
-    //   localStream.getTracks().forEach(track => track.stop());
-    // }
-
-    // setLocalStream(null);
-    // setremoteCallStream(null);
-    setIsCallInProgress(false);
-    setMode(null);
-
-    // Notify the server that the call was ended (optional)
-    if (socket) {
-      console.log("endcall --");
-      socket.emit('endCall', { reciverUid, uid });
-    }
-  }
-};
 
   return (
     <>
       <div className='bg-slate-900 text-white w-full h-screen '>
-        <div className='flex justify-center gap-2 py-3'>
+        <div className='grid-cols-4 grid gap-2 py-3'>
+          <div className='grid gap-3'>
+            <div className={`${anyOnceCalling?.connected ? "" : "hidden"} grid gap-3`}>
+              <span>Call From :{anyOnceCalling ? `${anyOnceCalling.senderPh}` : ""}</span>
+              <button onClick={endCall} className='bg-red-700 rounded-md px-1'>Reject Call</button>
+              <button onClick={aceptedCall} className='bg-green-500 rounded-md px-1'>Accept Call</button>
+            </div>
+
+          </div>
           <div className='grid gap-2'>
             <h3>Enter Your uid</h3>
             <input ref={inpUid} type="text" className='border rounded-md' placeholder='  Enter Your Uid' />
@@ -194,7 +186,10 @@ const endCall = () => {
             <input ref={inpreciverUid} type="text" className='border rounded-md' placeholder='  Enter reciver Uid' />
             <button onClick={handleReciverUid} className='bg-amber-700 rounded-md px-1'>submit</button>
           </div>
-          <button onClick={endCall} className='bg-red-700 rounded-md px-1'>End Call</button>
+          <div className='grid gap-2'>
+            <button onClick={rejectOutgoingCall} className='bg-red-700 rounded-md px-1'>End Call</button>
+            <button onClick={Call} className='bg-green-500 rounded-md px-1'>Call</button>
+          </div>
 
         </div>
         <div className='flex gap-3 justify-around'>

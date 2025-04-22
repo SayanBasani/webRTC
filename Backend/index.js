@@ -44,7 +44,24 @@ io.on('connection', (socket) => {
     const reciverSocketId = reciverDetails.socketId;
     console.log("me--",socket.id , "reciver-->",reciverSocketId);
     console.log("reciverData -->",reciverSocketId);
-    socket.to(reciverSocketId).emit("incomingCall",{connected:true , reciverId : reciverSocketId, senderId :socket.id , offer});
+    socket.to(reciverSocketId).emit("incomingCall",{connected:true , reciverId : reciverSocketId, senderId :socket.id ,senderPh:uid,offer});
+  })
+
+  socket.on("rejectOutingCall",(data)=>{
+    console.log("rejectOutingCall --> incomingCall");
+
+    const {reciverData } = data;
+    if(!reciverData ){ return ;}
+    const reciverDetails = userListWithUid.get(reciverData);
+    if(!reciverDetails){
+      console.log("no details of the reciver");
+      socket.emit("incomingCallErr",{connected:false, message:"This User is Not Online |Ph No. ->",reciverData});
+      return;
+    }
+    const reciverSocketId = reciverDetails.socketId;
+    console.log("me--",socket.id , "reciver-->",reciverSocketId);
+    console.log("reciverData -->",reciverSocketId);
+    socket.to(reciverSocketId).emit("incomingCall",{connected:false , reciverId : reciverSocketId, senderId :socket.id ,senderPh:uid});
   })
 
   socket.on("acceptCall",(data)=>{
@@ -54,10 +71,17 @@ io.on('connection', (socket) => {
     socket.to(callerId).emit("incomingAnswer",{from:socket.id , offer});
   })
 
+  socket.on("answerCall",(data)=>{
+    console.log("answerCall--",data);
+    const { answer, reciverid, from} =data;
+    socket.to(reciverid).emit("answerCall",{from:socket.id,answer})
+  })
+
   // Event More i have to add -> cancelCall ,rejectCall,endCall
-  socket.on("iceCandidate", (data) => {
-    const { candidate, to } = data;
-    socket.to(to).emit("iceCandidate", { candidate });
+  socket.on("ice-candidate", (data) => {
+    const { from,reciverData,candidate } = data;
+    console.log("ice-candidate");
+    socket.to(reciverData).emit("ice-candidate", { candidate,from });
   });
   socket.on('disconnect', function () {
     console.log(socket.id,'user disconnected');
