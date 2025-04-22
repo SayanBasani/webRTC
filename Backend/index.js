@@ -6,6 +6,7 @@ const app = express();
 app.use(express.json());
 app.use(cors({
   origin:"*",
+  methods:["GET","POST"]
 }))
 
 const userListWithUid = new Map();
@@ -30,6 +31,8 @@ io.on('connection', (socket) => {
 
 
   socket.on("outgoingCall",(data)=>{
+    console.log("outgoingCall --> incomingCall");
+
     const {reciverData , offer } = data;
     if(!reciverData || !offer){ return ;}
     const reciverDetails = userListWithUid.get(reciverData);
@@ -39,11 +42,13 @@ io.on('connection', (socket) => {
       return;
     }
     const reciverSocketId = reciverDetails.socketId;
+    console.log("me--",socket.id , "reciver-->",reciverSocketId);
     console.log("reciverData -->",reciverSocketId);
     socket.to(reciverSocketId).emit("incomingCall",{connected:true , reciverId : reciverSocketId, senderId :socket.id , offer});
   })
 
   socket.on("acceptCall",(data)=>{
+    console.log("acceptCall --- incomingAnswer");
     const {callerId,offer} = data;
     if (!callerId || !offer) {return;}
     socket.to(callerId).emit("incomingAnswer",{from:socket.id , offer});
