@@ -40,7 +40,7 @@ io.on('connection', (socket) => {
       console.log("no details of the reciver");
       socket.emit("incomingCallErr",{connected:false, message:"This User is Not Online |Ph No. ->",reciverData});
       return;
-    }
+    } 
     const reciverSocketId = reciverDetails.socketId;
     console.log("me--",socket.id , "reciver-->",reciverSocketId);
     console.log("reciverData -->",reciverSocketId);
@@ -81,12 +81,15 @@ io.on('connection', (socket) => {
   // Event More i have to add -> cancelCall ,rejectCall,endCall
   socket.on("ice-candidate", (data) => {
     const { from,reciverData,candidate } = data;
-    console.log("ice-candidate");
-    socket.to(reciverData).emit("ice-candidate", { candidate,from });
+    const reciverDetails = userListWithUid.get(reciverData);
+    const reciverId = reciverDetails.socketId;
+    console.log(from,"------------------------",reciverData,"-----",reciverId);
+    console.log("ice-candidate from", from, "to", reciverData);
+    socket.to(reciverId).emit("ice-candidate", { candidate,from });
   });
   socket.on("send-ice-candidate", ({ reciverData, candidate }) => {
     io.to(reciverData).emit("receive-ice-candidate", { candidate });
-  });
+  }); 
   socket.on('disconnect', function () {
     console.log(socket.id,'user disconnected');
     userListWithUid.delete(uid);
@@ -94,7 +97,7 @@ io.on('connection', (socket) => {
   
   });
 })
-
+ 
 server.listen(port, function() {
   console.log(`Listening on port ${port}`);
 });

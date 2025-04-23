@@ -10,10 +10,7 @@ function App() {
   const inpreciverUid = useRef();
   const peerRef = useRef(null);
   const [anyOnceCalling, setanyOnceCalling] = useState(null);
-  useEffect(() => {
-    const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-    peerRef.current = peer;
-  }, [])
+
 
   // set uids 
   const handleUid = useCallback(() => { //handle Uid
@@ -30,13 +27,10 @@ function App() {
   }, []);
   // set uids !
 
-  const [iceCandidate, seticeCandidate] = useState(null);
-  const candidateQueue = useRef([]);
-  const isRemoteDescSet = useRef(false);
+
   useEffect(() => {
     if (!socket) { console.warn("!socket", socket); return; }
     const handleIncomingCall = (data) => {
-      console.log(`handeling incoming Call --`, { data });
       if (!data) { console.warn("!data"); return; }
       const { connected, reciverId, senderId, senderPh, offer } = data;
       setanyOnceCalling(data);
@@ -44,29 +38,36 @@ function App() {
     };
 
     const handleIncomingAnswer = async ({ answer }) => {
-      console.log(`handeling incoming Answer --`, { answer });
       if (!peerRef.current) return;
-      console.log("peerRef.current", peerRef.current);
-      await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-      console.log("Answer received and set as remote description");
+      // console.log(answer);
+      // await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+      // console.log("Answer received and set as remote description");
+      const peer = peerRef.current;
+
+      // Check if a remote description has already been set
+      if (peer.remoteDescription) {
+        console.warn("Remote description already set. Skipping.");
+        return;
+      }
+      try {
+        await peer.setRemoteDescription(new RTCSessionDescription(answer));
+        console.log("Answer received and set as remote description");
+      } catch (error) {
+        console.error("Error setting remote description:", error);
+      }
     };
 
     const handleIceCandidate = async ({ candidate }) => {
-      console.log(`handeling ICE Candidate-`, { candidate });
-      if (!peerRef.current) return;
-      if (!candidate) return;
-      seticeCandidate(candidate)
-      console.log("peerRef.current", peerRef.current);
-
-      if(isRemoteDescSet.current){
-        await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-        console.log("ICE candidate added immediately");
-      } else {
-        console.log("ICE candidate queued");
-        candidateQueue.current.push(candidate);
+      console.log("recived ice-candidate on with->",{candidate});
+      if (candidate) {
+        try {
+          await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          console.log("ICE candidate added");
+        } catch (error) {
+          console.error("Error adding caller ICE candidate:", error);
+        }
       }
     }
-
 
     socket.on("incomingCall", handleIncomingCall);
     socket.on("incomingAnswer", handleIncomingAnswer);
@@ -86,15 +87,16 @@ function App() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localVideoRef.current.srcObject = stream;
 
-      // const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-      // peerRef.current = peer;
-      if (!peerRef.current) { console.warn(`!peer--${peerRef.current}`); }
-      const peer = peerRef.current;
+      const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+      peerRef.current = peer;
 
       stream.getTracks().forEach((track) => { peer.addTrack(track, stream); });
+      // stream.getTracks().forEach(track => { peer.addTrack(track, stream); });
       console.log("Caller local stream tracks: ", stream.getTracks());
       peer.onicecandidate = (event) => {
         if (event.candidate) {
+          // Fix this in startCall (caller side)
+          console.log("start call ice-candidate emit with->",{candidate : event.candidate});
           socket.emit("ice-candidate", { from: socket.id, reciverData: reciverUid, candidate: event.candidate });
 
         }
@@ -113,45 +115,35 @@ function App() {
     }
   };
 
-  const aceptedCall = async () => { // Accept Call
+  const aceptedCall = async () => {
     if (!anyOnceCalling) { console.warn("!Call Recived"); return; }
     if (!socket) { console.warn("!socket"); return; }
 
     try {
       const { connected, reciverId, senderId, senderPh, offer } = anyOnceCalling;
-      // const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-      // peerRef.current = peer;
-      if (!peerRef.current) { console.warn(`!peer--${peerRef.current}`); }
-      const peer = peerRef.current;
+      console.log("anyOnceCalling",anyOnceCalling);
+      const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
 
+      peerRef.current = peer;
+      // await peer.setRemoteDescription(new RTCSessionDescription(offer));
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       stream.getTracks().forEach((track) => { peer.addTrack(track, stream) });
       localVideoRef.current.srcObject = stream;
       await peer.setRemoteDescription(new RTCSessionDescription(offer)); //..
-      // isRemoteDescSet.current = true;
-      // for (const candidate of candidateQueue.current){
-      //   await peer.addIceCandidate(new RTCIceCandidate(candidate));
-      // }
-      // candidateQueue.current = [];
-      // console.log("flushed candidate queued");
-      if(iceCandidate){
-        await peer.addIceCandidate(new RTCIceCandidate(iceCandidate));
-        console.log("is it ok ??  iceCandidate",iceCandidate);
-      }else{
-        console.log("it is not complet iceCandidate",iceCandidate);
-      }
-      if(!iceCandidate){console.warn("no ice candidate");}
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
       socket.emit('acceptCall', { callerId: senderId, answer })
 
       peer.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log("accept call ice-candidate emit with->",{candidate : event.candidate});
           socket.emit("ice-candidate", { from: socket.id, reciverData: senderPh, candidate: event.candidate })
         }
       }
 
       peer.ontrack = (event) => {
+        // const remoteStream = event.streams[0];
+        // remoteVideoRef.current.srcObject = remoteStream;
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = event.streams[0];
         }
@@ -179,6 +171,7 @@ function App() {
     socket?.emit("endCall", { to: reciverUid });
     console.log("Call ended");
   };
+
 
 
   const rejectOutgoingCall = useCallback(() => { }, [])
